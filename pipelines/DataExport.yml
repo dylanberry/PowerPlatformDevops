@@ -1,0 +1,90 @@
+parameters:
+- name: SolutionName
+  displayName: Solution Name
+  type: string
+  default: 'ConferenceApp'
+- name: EnvUrl
+  displayName: Source Environment Url
+  type: string
+  default: 'https://toentdevops-dev.crm3.dynamics.com/'
+
+trigger: none
+
+variables:
+  - group: toentdevops
+  - SolutionName: ${{ parameters.SolutionName }}
+  - DataExportEnvironmentUrl: ${{ parameters.EnvUrl }}
+
+jobs:
+- job: exportData
+  displayName: Export Data
+  pool:
+    vmImage: windows-2019
+  steps:
+  - checkout: self
+    persistCredentials: True
+    
+  - pwsh: |
+      $connString = "AuthType=ClientSecret;url=$(DataExportEnvironmentUrl);ClientId=$(ClientId);ClientSecret=$(ClientSecret)"
+    
+      $DataPackagePath = '$(Build.BinariesDirectory)\Data.zip'
+      $DataSchemaFilePath = '$(Build.SourcesDirectory)\data\$(SolutionName)\data-schema.xml'
+      $DataExportFolderPath = '$(Build.SourcesDirectory)\data\$(SolutionName)\data\'
+
+      Write-Host "Data Package Path: $DataPackagePath"
+      Write-Host "Data Schema File Path: $DataSchemaFilePath"
+
+      If(-not(Get-InstalledModule Microsoft.Xrm.Tooling.ConfigurationMigration -ErrorAction silentlycontinue)) {
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module Microsoft.Xrm.Tooling.ConfigurationMigration -Confirm:$False -Force -AllowClobber
+      }
+      If(-not(Get-InstalledModule Microsoft.Xrm.Data.PowerShell -ErrorAction silentlycontinue)) {
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module Microsoft.Xrm.Data.PowerShell -Confirm:$False -Force -AllowClobber
+      }
+      Import-Module Microsoft.Xrm.Data.Powershell
+
+      $timeoutInMinutes = 30
+      $timeout = $timeoutInMinutes * 60
+      $maxConnectionTimeout = New-Object System.TimeSpan -ArgumentList 0,0,$timeout
+      [Microsoft.Xrm.Tooling.Connector.CrmServiceClient]::MaxConnectionTimeout = $maxConnectionTimeout 
+
+      Write-Host "Create CRM connection and set $timeoutInMinutes minute timeout"
+      $conn = Get-CrmConnection -ConnectionString $connString
+      Set-CrmConnectionTimeout -conn $conn -TimeoutInSeconds $timeout
+
+      Export-CrmDataFile -CrmConnection $conn -SchemaFile $DataSchemaFilePath -DataFile $DataPackagePath -Verbose -LogWriteDirectory '$(Build.ArtifactStagingDirectory)\Data'
+
+      copy $DataPackagePath '$(Build.ArtifactStagingDirectory)\Data.zip’
+    displayName: Export Data Package
+
+  - task: PublishBuildArtifacts@1
+    displayName: 'Publish Artifact: drop'
+    condition: succeededOrFailed()
+
+  - task: ExtractFiles@1
+    displayName: Extract Data Package
+    inputs:
+      archiveFilePatterns: $(Build.BinariesDirectory)\Data.zip
+      destinationFolder: $(Build.SourcesDirectory)\data\$(SolutionName)\data\
+      cleanDestinationFolder: false
+      overwriteExistingFiles: true
+      
+  - pwsh: |
+      $exportBranchName = "export-$(SolutionName)-$(Build.BuildId)"
+
+      cd $(Build.SourcesDirectory)
+
+      git config user.email "export.pipeline@dev.azure.com"
+      git config user.name "Export Pipeline"
+
+      git checkout $(Build.SourceBranchName)
+      git checkout -b $exportBranchName
+
+      git add --all
+      git commit -m "$(SolutionName)-$(Build.BuildId)"
+
+      git -c http.extraheader="AUTHORIZATION: bearer $env:MY_ACCESS_TOKEN" push --set-upstream origin $exportBranchName
+    env:
+      MY_ACCESS_TOKEN: $(System.AccessToken)
+    displayName: Commit Data Files

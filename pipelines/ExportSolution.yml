@@ -1,0 +1,69 @@
+parameters:
+- name: SolutionName
+  displayName: Solution Name
+  type: string
+  default: 'ConferenceApp'
+- name: EnvName
+  displayName: Source Environment
+  type: string
+  default: 'toentdevops-dev'
+
+trigger: none
+
+variables:
+  - SolutionName: ${{ parameters.SolutionName }}
+  - SourceEnvSvcConn: ${{ parameters.EnvName }}
+
+jobs:
+- job: exportSolution
+  displayName: Export Solution
+
+  pool:
+    vmImage: windows-2019
+
+  steps:
+  - checkout: self
+    persistCredentials: True
+
+  - pwsh: |
+      $solutionName = "$(SolutionName)"
+      $exportBranchName = "export-$(SolutionName)-$(Build.BuildId)"
+
+      cd $(Build.SourcesDirectory)
+
+      git config user.email "export.pipeline@dev.azure.com"
+      git config user.name "Export Pipeline"
+
+      git checkout $(Build.SourceBranchName)
+      git checkout -b $exportBranchName
+
+      git -c http.extraheader="AUTHORIZATION: bearer $(System.AccessToken)" push --set-upstream origin $exportBranchName    env:
+    env:
+      MY_ACCESS_TOKEN: $(System.AccessToken)
+
+  - task: PowerPlatformToolInstaller@0
+    displayName: 'Power Platform Tool Installer'
+
+  - task: PowerPlatformExportSolution@0
+    displayName: 'Power Platform Export Solution'
+    inputs:
+      authenticationType: PowerPlatformSPN
+      PowerPlatformSPN: $(SourceEnvSvcConn)
+      SolutionName: $(SolutionName)
+      SolutionOutputFile: $(Build.BinariesDirectory)/$(SolutionName).zip
+
+  - task: PowerPlatformUnpackSolution@0
+    displayName: 'Power Platform Unpack Solution'
+    inputs:
+      SolutionInputFile: $(Build.BinariesDirectory)/$(SolutionName).zip
+      SolutionTargetFolder: $(Build.SourcesDirectory)/$(SolutionName)
+
+  - pwsh: |
+      cd $(Build.SourcesDirectory)
+
+      git add --all
+      git commit -m "$(SolutionName)-$(Build.BuildId)"
+
+      git -c http.extraheader="AUTHORIZATION: bearer $env:MY_ACCESS_TOKEN" push
+    env:
+      MY_ACCESS_TOKEN: $(System.AccessToken)

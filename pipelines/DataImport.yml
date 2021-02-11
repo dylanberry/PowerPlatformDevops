@@ -1,0 +1,76 @@
+parameters:
+- name: SolutionName
+  displayName: Solution Name
+  type: string
+  default: 'ConferenceApp'
+- name: EnvUrl
+  displayName: Target Environment Url
+  type: string
+  default: 'https://toentdevops-qa.crm3.dynamics.com/'
+
+trigger: none
+
+variables:
+  - group: toentdevops
+  - SolutionName: ${{ parameters.SolutionName }}
+  - TargetEnvironmentUrl: ${{ parameters.EnvUrl }}
+
+jobs:
+- job: importData
+  displayName: Import Data
+  pool:
+    vmImage: windows-2019
+  steps:
+  - checkout: self
+  
+  - task: ArchiveFiles@2
+    displayName: Zip Data Package
+    inputs:
+      rootFolderOrFile: $(Build.SourcesDirectory)/data/$(SolutionName)/data/
+      includeRootFolder: false
+      archiveFile: $(Build.BinariesDirectory)/Data.zip
+
+  - pwsh: |
+      $connString = "AuthType=ClientSecret;url=$(TargetEnvironmentUrl);ClientId=$(ClientId);ClientSecret=$(ClientSecret)"
+          
+      $DataPackageFilePath = '$(Build.BinariesDirectory)\Data.zip'
+
+      Write-Host "Data Package Path: $DataPackageFilePath"
+
+      Write-Host "Copy data import package from $DataPackageFilePath to $(Build.ArtifactStagingDirectory)"
+      cp $DataPackageFilePath '$(Build.ArtifactStagingDirectory)'
+
+      If(-not(Get-InstalledModule Microsoft.Xrm.Tooling.ConfigurationMigration -ErrorAction silentlycontinue)) {
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module Microsoft.Xrm.Tooling.ConfigurationMigration -Confirm:$False -Force -AllowClobber
+      }
+
+      If(-not(Get-InstalledModule Microsoft.Xrm.Data.PowerShell -ErrorAction silentlycontinue)) {
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module Microsoft.Xrm.Data.PowerShell -Confirm:$False -Force -AllowClobber
+      }
+      Import-Module Microsoft.Xrm.Data.Powershell
+
+      $timeoutInMinutes = 30
+      $timeout = $timeoutInMinutes * 60
+      $maxConnectionTimeout = New-Object System.TimeSpan -ArgumentList 0,0,$timeout
+      [Microsoft.Xrm.Tooling.Connector.CrmServiceClient]::MaxConnectionTimeout = $maxConnectionTimeout 
+
+      Write-Host "Create CRM connection and set $timeoutInMinutes minute timeout"
+      $conn = Get-CrmConnection -ConnectionString $connString
+      Set-CrmConnectionTimeout -conn $conn -TimeoutInSeconds $timeout
+
+      Write-Host "Importing data import package from $DataPackageFilePath; logging to $(Build.ArtifactStagingDirectory)"
+      Import-CrmDataFile -CrmConnection $conn -DataFile $DataPackageFilePath -EnabledBatchMode -BatchSize 600 -EmitLogToConsole -Verbose -LogWriteDirectory '$(Build.ArtifactStagingDirectory)'
+
+      $importErrors = Get-ChildItem '$(Build.ArtifactStagingDirectory)' -Filter "*.log" | % {Select-String -Path "$(Build.ArtifactStagingDirectory)\$_" -Pattern 'error'}
+
+      if ($importErrors) {
+        Throw $importErrors
+      }
+    displayName: Import Data
+    
+  - task: PublishBuildArtifacts@1
+    displayName: 'Publish Artifact: drop'
+    condition: succeededOrFailed()
+
