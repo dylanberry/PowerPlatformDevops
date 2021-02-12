@@ -10,9 +10,11 @@ parameters:
 
 trigger: none
 
+# Title case variables denote mapping to a parameter
 variables:
-  - SolutionName: ${{ parameters.SolutionName }}
-  - SourceEnvSvcConn: ${{ parameters.EnvName }}
+  SolutionName: ${{ parameters.SolutionName }}
+  SourceEnvSvcConn: ${{ parameters.EnvName }}
+  exportBranchName: 'export-$(SolutionName)-$(Build.BuildId)'
 
 jobs:
 - job: exportSolution
@@ -27,7 +29,7 @@ jobs:
 
   - pwsh: |
       $solutionName = "$(SolutionName)"
-      $exportBranchName = "export-$(SolutionName)-$(Build.BuildId)"
+      $exportBranchName = "$(exportBranchName)"
 
       cd $(Build.SourcesDirectory)
 
@@ -37,7 +39,7 @@ jobs:
       git checkout $(Build.SourceBranchName)
       git checkout -b $exportBranchName
 
-      git -c http.extraheader="AUTHORIZATION: bearer $(System.AccessToken)" push --set-upstream origin $exportBranchName    env:
+      git -c http.extraheader="AUTHORIZATION: bearer $env:MY_ACCESS_TOKEN" push --set-upstream origin $exportBranchName
     env:
       MY_ACCESS_TOKEN: $(System.AccessToken)
 
@@ -67,3 +69,13 @@ jobs:
       git -c http.extraheader="AUTHORIZATION: bearer $env:MY_ACCESS_TOKEN" push
     env:
       MY_ACCESS_TOKEN: $(System.AccessToken)
+
+  # https://marketplace.visualstudio.com/items?itemName=sander-aernouts.git-buildtasks  
+  - task: GitCreatePullRequest@0
+    displayName: Create PR for $(exportBranchName) branch
+    inputs:
+      repositorySelectionMethod: 'currentBuild'
+      sourceBranch: refs/heads/$(exportBranchName)
+      targetBranch: $(Build.SourceBranch)
+      autoComplete: false
+      deleteSourceBranch: true
