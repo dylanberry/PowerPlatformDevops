@@ -8,23 +8,27 @@ parameters:
   type: string
   default: 'https://toentdevops-dev.crm3.dynamics.com/'
 
-trigger: none
-
 variables:
   - group: toentdevops
-  - SolutionName: ${{ parameters.SolutionName }}
-  - DataExportEnvironmentUrl: ${{ parameters.EnvUrl }}
+  - name: SolutionName
+    value: ${{ parameters.SolutionName }}
+  - name: DataExportEnvironmentUrl
+    value: ${{ parameters.EnvUrl }}
+
+trigger: none
 
 jobs:
 - job: exportData
   displayName: Export Data
+
   pool:
     vmImage: windows-2019
+
   steps:
   - checkout: self
     persistCredentials: True
     
-  - pwsh: |
+  - powershell: |
       $connString = "AuthType=ClientSecret;url=$(DataExportEnvironmentUrl);ClientId=$(ClientId);ClientSecret=$(ClientSecret)"
     
       $DataPackagePath = '$(Build.BinariesDirectory)\Data.zip'
@@ -70,7 +74,7 @@ jobs:
       cleanDestinationFolder: false
       overwriteExistingFiles: true
       
-  - pwsh: |
+  - powershell: |
       $exportBranchName = "export-$(SolutionName)-$(Build.BuildId)"
 
       cd $(Build.SourcesDirectory)

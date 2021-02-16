@@ -1,0 +1,61 @@
+parameters:
+- name: DeploymentEnvironment
+  displayName: Deployment Environment
+  type: string
+  default: 'toentdevops-qa'
+
+- name: SolutionName
+  displayName: Solution Name
+  type: string
+  default: 'ConferenceApp'
+
+- name: ArtifactName
+  displayName: Artifact Name
+  type: string
+  default: 'drop'
+
+- name: PipelineDefinitionId
+  displayName: Pipeline Definition Id
+  type: string
+
+trigger:
+  none
+
+pool:
+  vmImage: 'windows-2019'
+
+jobs:
+
+- deployment: deployPackage
+  displayName: Deploy Package to ${{ parameters.DeploymentEnvironment }}
+  environment: ${{ parameters.DeploymentEnvironment }}
+  strategy:
+    runOnce:
+      deploy:
+        steps:
+        
+        - task: DownloadPipelineArtifact@2
+          inputs: 
+            source: 'specific'
+            artifact: '${{ parameters.ArtifactName }}'
+            path: $(Pipeline.Workspace)
+            project: 'PowerPlatform'
+            pipeline: ${{ parameters.PipelineDefinitionId }
+
+        - task: PowerPlatformToolInstaller@0
+          inputs:
+            DefaultVersion: true
+
+        - task: PowerPlatformBackupEnvironment@0
+          inputs:
+            authenticationType: 'PowerPlatformSPN'
+            PowerPlatformSPN: ${{ parameters.DeploymentEnvironment }}
+            BackupLabel: 'Full Backup - $(Build.BuildNumber)'
+
+        - task: PowerPlatformImportSolution@0
+          inputs:
+            authenticationType: 'PowerPlatformSPN'
+            PowerPlatformSPN: ${{ parameters.DeploymentEnvironment }}
+            SolutionInputFile: '$(Pipeline.Workspace)/${{ parameters.ArtifactName }}/${{ parameters.SolutionName }}.zip'
+            AsyncOperation: true
+            MaxAsyncWaitTime: '60'

@@ -12,8 +12,10 @@ trigger: none
 
 variables:
   - group: toentdevops
-  - SolutionName: ${{ parameters.SolutionName }}
-  - TargetEnvironmentUrl: ${{ parameters.EnvUrl }}
+  - name: SolutionName
+    value: ${{ parameters.SolutionName }}
+  - name: TargetEnvironmentUrl
+    value: ${{ parameters.EnvUrl }}
 
 jobs:
 - job: importData
@@ -30,7 +32,7 @@ jobs:
       includeRootFolder: false
       archiveFile: $(Build.BinariesDirectory)/Data.zip
 
-  - pwsh: |
+  - powershell: |
       $connString = "AuthType=ClientSecret;url=$(TargetEnvironmentUrl);ClientId=$(ClientId);ClientSecret=$(ClientSecret)"
           
       $DataPackageFilePath = '$(Build.BinariesDirectory)\Data.zip'
