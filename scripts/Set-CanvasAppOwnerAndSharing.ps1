@@ -17,7 +17,7 @@ Import-Module Microsoft.PowerApps.Administration.PowerShell
 
 Add-PowerAppsAccount
 
-$environment = Get-AdminPowerAppEnvironment | ? {$_.DisplayName -eq $EnvironmentName}
+$environment = Get-AdminPowerAppEnvironment | ? {$_.DisplayName -like "$EnvironmentName*"}
 
 $canvasApps = Get-AdminPowerApp -EnvironmentName $environment.EnvironmentName | ? {$_.Owner | Select | ? type -eq "ServicePrincipal"} | Select *
 $ownerAccount = Get-UsersOrGroupsFromGraph -SearchString $OwnerAccountEmail | ? {$_.UserPrincipalName -eq $OwnerAccountEmail}
