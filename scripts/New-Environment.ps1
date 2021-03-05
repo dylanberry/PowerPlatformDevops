@@ -75,19 +75,42 @@ if ($AzureDevOpsCredentials) {
     az login --allow-no-subscriptions
 }
 
+
 # Determine environment name from user name and date
 $azureDevOpsUserDetails = az ad signed-in-user show | ConvertFrom-Json
 $userName = $azureDevOpsUserDetails.DisplayName.ToLower().Replace(' ', '')
 
-$generatedEnvironmentName = $userName + "-" + ([DateTime]::Now).ToString("yyyy-MM-dd-hh-mm")
+$generatedEnvironmentName = $userName + "_" + ([DateTime]::Now).ToString("yyyyMMdd_HHmm")
 
 if (-not $PowerPlatformEnvironmentName) {
     $PowerPlatformEnvironmentName = $generatedEnvironmentName
 }
 
 if (-not $PowerPlatformEnvironmentDomain) {
-    $PowerPlatformEnvironmentDomain = $generatedEnvironmentName
+    $PowerPlatformEnvironmentDomain = $generatedEnvironmentName.Replace('_', '-')
 }
+
+
+# Lookup ClientId from variable group
+if (-not $ClientId) {
+    # First see if there is an environment specific client id
+    $environmentClientIdVariableName = $PowerPlatformEnvironmentName + '_clientid'
+    Write-Host "Looking up variable $environmentClientIdVariableName"
+    $vg = az pipelines variable-group list `
+        --org "https://dev.azure.com/$AzureDevOpsOrganization" `
+        --project $AzureDevOpsProject `
+        --group-name $VariableGroupName | ConvertFrom-Json
+    $clientIdValue = $vg.variables.psobject.properties | ? Name -like $environmentClientIdVariableName
+    
+    if (-not $clientIdValue) {      
+        Write-Host "Looking up variable ClientId"
+        # if no environment specific client id, get the generic client id
+        $clientIdValue = $vg.variables.psobject.properties | ? Name -eq 'ClientId'
+    }
+    $ClientId = $clientIdValue.value.value
+}
+if (-not $ClientId) { throw "A valid App Registration is required to provision an environment. Please specify a TenantId/ClientId/ClientSecret as parameters to this script or in the Azure DevOps variable group $VariableGroupName"}
+Write-Host "Using ClientId $ClientId"
 
 
 # Create environment
@@ -103,25 +126,6 @@ $newEnvironmentResult = New-AdminPowerAppEnvironment -DisplayName $PowerPlatform
 $newEnvironmentUrl = $newEnvironmentResult.Internal.properties.linkedEnvironmentMetadata.instanceUrl
 Write-Host "Created environment $newEnvironmentUrl"
 
-
-# Lookup ClientId from variable group
-if (-not $ClientId) {
-    # First see if there is an environment specific client id
-    $environmentClientIdVariableName = $PowerPlatformEnvironmentName + '_clientid'
-    Write-Host "Looking up variable $environmentClientIdVariableName"
-    $vg = az pipelines variable-group list `
-        --org "https://dev.azure.com/$AzureDevOpsOrganization" `
-        --project $AzureDevOpsProject `
-        --group-name $VariableGroupName | ConvertFrom-Json
-    $vg
-    $ClientId = $vg.variables.psobject.properties | ? Name -like $environmentClientIdVariableName
-    
-    if (-not $ClientId) {      
-        Write-Host "Looking up variable ClientId"
-        # if no environment specific client id, get the generic client id
-        $ClientId = $vg.variables.psobject.properties | ? Name -eq 'ClientId'
-    }
-}
 
 
 # Create application user and grant system administrator
@@ -169,11 +173,11 @@ $templateParameters = @{
     EnvironmentUrl = $newEnvironmentUrl;
     EnvironmentName = $PowerPlatformEnvironmentName;
     VariableGroupName = $VariableGroupName;
-    TenantId = $TenantId;
     ClientId = $ClientId;
-    ClientSecret = $ClientSecret;
     DeploymentPipelineId = $DeploymentPipelineId
 }
+if ($TenantId) { $templateParameters.Add("TenantId", $TenantId) }
+if ($ClientSecret) { $templateParameters.Add("ClientSecret", $ClientSecret) }
 
 $body = @{
     templateParameters = $templateParameters;
